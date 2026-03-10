@@ -57,3 +57,60 @@ def get_distinct_series_ids():
 
 def get_distinct_patient_ids():
     return sorted(col_time_series().distinct("Patient_ID"))
+
+def get_time_series_by_series_id(series_id: str, limit: int = 0):
+    cursor = col_time_series().find(
+        {"Series_ID": series_id}, {"_id": 0}
+    ).sort("Timestamp", 1)
+    if limit:
+        cursor = cursor.limit(limit)
+    return list(cursor)
+
+
+def get_time_series_by_patient(patient_id: str, limit: int = 500):
+    return list(
+        col_time_series()
+        .find({"Patient_ID": patient_id}, {"_id": 0})
+        .sort("Timestamp", 1)
+        .limit(limit)
+    )
+
+
+def get_all_time_series_sample(limit: int = 100):
+    return list(col_time_series().find({}, {"_id": 0}).limit(limit))
+
+
+def get_all_patterns():
+    return list(col_patterns().find({}, {"_id": 0}))
+
+
+def get_patterns_by_series(series_id: str):
+    return list(col_patterns().find({"Series_ID": series_id}, {"_id": 0}))
+
+
+def get_all_trends():
+    return list(col_trends().find({}, {"_id": 0}))
+
+
+def get_trends_by_series(series_id: str):
+    return list(col_trends().find({"Series_ID": series_id}, {"_id": 0}))
+
+
+def get_all_seasonality():
+    return list(col_seasonality().find({}, {"_id": 0}))
+
+
+def get_seasonality_by_series(series_id: str):
+    return list(col_seasonality().find({"Series_ID": series_id}, {"_id": 0}))
+
+
+def get_collection_stats():
+    db = get_db()
+    if db is None:
+        return {"time_series": 0, "patterns": 0, "trends": 0, "seasonality": 0}
+    return {
+        "time_series": col_time_series().count_documents({}),
+        "patterns": col_patterns().count_documents({}),
+        "trends": col_trends().count_documents({}),
+        "seasonality": col_seasonality().count_documents({}),
+    }
