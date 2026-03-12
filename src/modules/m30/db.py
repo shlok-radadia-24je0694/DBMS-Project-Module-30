@@ -114,3 +114,82 @@ def get_collection_stats():
         "trends": col_trends().count_documents({}),
         "seasonality": col_seasonality().count_documents({}),
     }
+
+def agg_moving_average(series_id: str, metric: str = "HeartRate", window: int = 5):
+    docs = get_time_series_by_series_id(series_id)
+    if not docs:
+        return []
+    values = [d.get(metric) for d in docs if d.get(metric) is not None]
+    timestamps = [d.get("Timestamp") for d in docs if d.get(metric) is not None]
+    ma = []
+    for i in range(len(values)):
+        start = max(0, i - window + 1)
+        avg = statistics.mean(values[start : i + 1])
+        ma.append({
+            "Timestamp": timestamps[i],
+            "Value": values[i],
+            "Moving_Avg": round(avg, 2),
+        })
+    return ma
+
+
+def agg_rate_of_change(series_id: str, metric: str = "HeartRate"):
+    docs = get_time_series_by_series_id(series_id)
+    if not docs:
+        return []
+    values = [(d.get("Timestamp"), d.get(metric)) for d in docs if d.get(metric) is not None]
+    roc = []
+    for i in range(1, len(values)):
+        prev_val = values[i - 1][1]
+        curr_val = values[i][1]
+        change = round(curr_val - prev_val, 2)
+        pct = round((change / prev_val) * 100, 2) if prev_val != 0 else 0
+        roc.append({
+            "Timestamp": values[i][0],
+            "Value": curr_val,
+            "Change": change,
+            "Pct_Change": pct,
+        })
+    return roc
+
+
+def agg_anomaly_detection(series_id: str, metric: str = "HeartRate", sigma: float = 2.0):
+    docs = get_time_series_by_series_id(series_id)
+    if not docs:
+        return [], 0, 0
+    values = [(d.get("Timestamp"), d.get(metric)) for d in docs if d.get(metric) is not None]
+    if len(values) < 2:
+        return [], 0, 0
+    vals = [v[1] for v in values]
+    mean = statistics.mean(vals)
+    std = statistics.stdev(vals)
+    lower = mean - sigma * std
+    upper = mean + sigma * std
+    anomalies = []
+    for ts, val in values:
+        anomalies.append({
+            "Timestamp": ts,
+            "Value": val,
+            "Is_Anomaly": val < lower or val > upper,
+            "Lower_Bound": round(lower, 2),
+            "Upper_Bound": round(upper, 2),
+        })
+    return anomalies, round(mean, 2), round(std, 2)
+
+
+def agg_pattern_frequency():
+    pipeline = [
+        {"$group": {"_id": "$Pattern_Type", "count": {"$sum": 1},
+                     "avg_significance": {"$avg": "$Significance_Score"}}},
+        {"$sort": {"count": -1}},
+    ]
+    return list(col_patterns().aggregate(pipeline))
+
+
+def agg_trend_summary():
+    pipeline = [
+        {"$group": {"_id": "$Direction", "count": {"$sum": 1},
+                     "avg_slope": {"$avg": "$Slope_Value"}}},
+        {"$sort": {"count": -1}},
+    ]
+    return list(col_trends().aggregate(pipeline))
