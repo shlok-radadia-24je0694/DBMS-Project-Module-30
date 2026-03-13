@@ -193,3 +193,92 @@ def agg_trend_summary():
         {"$sort": {"count": -1}},
     ]
     return list(col_trends().aggregate(pipeline))
+
+def agg_series_count_by_frequency():
+    pipeline = [
+        {"$group": {"_id": "$Frequency", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    return list(col_time_series().aggregate(pipeline))
+
+
+def agg_series_count_by_patient():
+    pipeline = [
+        {"$group": {"_id": "$Patient_ID", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    return list(col_time_series().aggregate(pipeline))
+
+
+def agg_anomaly_count_by_series():
+    pipeline = [
+        {"$match": {"IsAnomaly": True}},
+        {"$group": {"_id": "$Series_ID", "anomaly_count": {"$sum": 1}}},
+        {"$sort": {"anomaly_count": -1}},
+    ]
+    return list(col_time_series().aggregate(pipeline))
+
+
+def agg_avg_vitals_by_patient(patient_id: str):
+    pipeline = [
+        {"$match": {"Patient_ID": patient_id}},
+        {"$group": {
+            "_id": "$Patient_ID",
+            "avg_heart_rate": {"$avg": "$HeartRate"},
+            "avg_systolic": {"$avg": "$SystolicBP"},
+            "avg_diastolic": {"$avg": "$DiastolicBP"},
+            "avg_temp": {"$avg": "$Temperature"},
+            "total_records": {"$sum": 1},
+            "anomaly_count": {"$sum": {"$cond": ["$IsAnomaly", 1, 0]}},
+        }},
+    ]
+    results = list(col_time_series().aggregate(pipeline))
+    return results[0] if results else None
+
+
+def agg_prediction_trend(series_id: str, metric: str = "HeartRate", forecast_steps: int = 10):
+    docs = get_time_series_by_series_id(series_id)
+    if not docs:
+        return [], []
+    values = [(d.get("Timestamp"), d.get(metric)) for d in docs if d.get(metric) is not None]
+    if len(values) < 2:
+        return [], []
+
+    vals = [v[1] for v in values]
+    n = len(vals)
+
+    # Simple linear regression: y = mx + b
+    x_mean = (n - 1) / 2
+    y_mean = statistics.mean(vals)
+    numerator = sum((i - x_mean) * (v - y_mean) for i, v in enumerate(vals))
+    denominator = sum((i - x_mean) ** 2 for i in range(n))
+    slope = numerator / denominator if denominator != 0 else 0
+    intercept = y_mean - slope * x_mean
+
+    actual = [{"Timestamp": ts, "Value": val} for ts, val in values]
+
+    # Determine time delta between points
+    if len(values) >= 2:
+        ts0 = values[0][0]
+        ts1 = values[1][0]
+        if isinstance(ts0, datetime) and isinstance(ts1, datetime):
+            delta = ts1 - ts0
+        else:
+            delta = timedelta(hours=1)
+    else:
+        delta = timedelta(hours=1)
+
+    last_ts = values[-1][0]
+    if not isinstance(last_ts, datetime):
+        last_ts = datetime.now()
+
+    predicted = []
+    for step in range(1, forecast_steps + 1):
+        future_val = round(slope * (n - 1 + step) + intercept, 2)
+        future_ts = last_ts + delta * step
+        predicted.append({
+            "Timestamp": future_ts,
+            "Value": future_val,
+            "Type": "predicted",
+        })
+    return actual, predicted
